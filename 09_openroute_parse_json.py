@@ -1,5 +1,8 @@
+from flask import Flask, request, jsonify
 import requests
 import json
+
+app = Flask(__name__)
 
 # OpenRouteService API Key
 directions_api = "https://api.openrouteservice.org/v2/directions/driving-car"
@@ -13,72 +16,31 @@ def geocode_address(address):
         json_data = response.json()
         if json_data["features"]:
             coords = json_data["features"][0]["geometry"]["coordinates"]
-            print(f"Geocoded coordinates for '{address}': {coords}")
-            if -90 <= coords[1] <= 90 and -180 <= coords[0] <= 180:
-                return coords
-            else:
-                print(f"Error: Invalid coordinates for address '{address}'")
-                return None
-        else:
-            print(f"Error: No results found for address '{address}'")
-            return None
-    else:
-        print(f"Error: {response.status_code} - {response.text}")
-        return None
+            return coords
+    return None
 
-while True:
-    orig = input("Starting Location: ")
-    if orig.lower() in ["quit", "q"]:
-        break
-    dest = input("Destination: ")
-    if dest.lower() in ["quit", "q"]:
-        break
+@app.route('/get_directions', methods=['GET'])
+def get_directions():
+    orig = request.args.get('origin')
+    dest = request.args.get('destination')
+    
+    if not orig or not dest:
+        return jsonify({"error": "Both origin and destination are required."}), 400
 
-    # Geocode addresses
     orig_coords = geocode_address(orig)
     dest_coords = geocode_address(dest)
-
+    
     if not orig_coords or not dest_coords:
-        print("Unable to geocode one or both addresses. Please try again.\n")
-        continue
-
-    # Construct JSON body for request
+        return jsonify({"error": "Unable to geocode one or both addresses."}), 400
+    
     body = {"coordinates": [orig_coords, dest_coords]}
-    headers = {
-        "Authorization": key,
-        "Content-Type": "application/json"
-    }
-
+    headers = {"Authorization": key, "Content-Type": "application/json"}
     response = requests.post(directions_api, headers=headers, json=body)
     json_data = response.json()
+    
+    if response.status_code == 200 and 'routes' in json_data:
+        return jsonify(json_data)
+    return jsonify({"error": "Failed to retrieve route."}), response.status_code
 
-    if response.status_code == 200:
-        if 'routes' in json_data and json_data['routes']:
-            route = json_data['routes'][0]
-            if 'segments' in route and route['segments']:
-                segment = route['segments'][0]
-                print("\nAPI Status: Successful route call.\n")
-                print("=============================================")
-                print(f"Directions from {orig} to {dest}")
-                
-                duration = segment.get('duration', 'N/A')
-                distance = segment.get('distance', 'N/A')
-                print(f"Trip Duration: {duration} seconds")
-                print(f"Distance: {distance} meters")
-                print("=============================================")
-                
-                if 'steps' in segment:
-                    for step in segment['steps']:
-                        instruction = step.get('instruction', 'N/A')
-                        step_distance = step.get('distance', 'N/A')
-                        print(f"{instruction} ({step_distance} meters)")
-                else:
-                    print("No step-by-step directions available.")
-                
-                print("=============================================\n")
-            else:
-                print("Error: No segments found in the route.")
-        else:
-            print("Error: No routes found in the response.")
-    else:
-        print(f"Error: {response.status_code} - {response.text}")
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
