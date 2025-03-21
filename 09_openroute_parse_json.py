@@ -1,57 +1,72 @@
-#!/usr/bin/env python3
-import cgi
+import sys
 import requests
 import json
 
-print("Content-Type: text/html\n")
-
-# OpenRouteService API Key
 directions_api = "https://api.openrouteservice.org/v2/directions/driving-car"
 geocode_api = "https://api.openrouteservice.org/geocode/search?"
 key = "5b3ce3597851110001cf6248d3b2e69446f14da6897f95686576108e"
 
 def geocode_address(address):
+    """Geocodes an address and returns its coordinates."""
     url = f"{geocode_api}api_key={key}&text={address}"
     response = requests.get(url)
+    
     if response.status_code == 200:
         json_data = response.json()
         if json_data["features"]:
-            return json_data["features"][0]["geometry"]["coordinates"]
+            coords = json_data["features"][0]["geometry"]["coordinates"]
+            return coords  
+    
     return None
 
-# Leer parámetros del formulario
-form = cgi.FieldStorage()
-orig = form.getvalue("origin")
-dest = form.getvalue("destination")
+if len(sys.argv) != 3:
+    print("Error: You must provide an origin and destination location.")
+    sys.exit(1)
 
-if not orig or not dest:
-    result = {"error": "Both origin and destination are required."}
-else:
-    orig_coords = geocode_address(orig)
-    dest_coords = geocode_address(dest)
+orig = sys.argv[1]
+dest = sys.argv[2]
 
-    if not orig_coords or not dest_coords:
-        result = {"error": "Unable to geocode one or both addresses."}
-    else:
-        body = {"coordinates": [orig_coords, dest_coords]}
-        headers = {"Authorization": key, "Content-Type": "application/json"}
-        response = requests.post(directions_api, headers=headers, json=body)
-        json_data = response.json()
+orig_coords = geocode_address(orig)
+dest_coords = geocode_address(dest)
 
-        if response.status_code == 200 and 'routes' in json_data:
-            segment = json_data['routes'][0]['segments'][0]
-            result = {
-                "duration": segment.get('duration', 'N/A'),
-                "distance": segment.get('distance', 'N/A'),
-                "steps": [{"instruction": step["instruction"], "distance": step["distance"]}
-                          for step in segment.get("steps", [])]
-            }
+if not orig_coords or not dest_coords:
+    print("Error: Could not geocode one or both addresses.")
+    sys.exit(1)
+
+body = {
+    "coordinates": [orig_coords, dest_coords]
+}
+
+headers = {
+    "Authorization": key,
+    "Content-Type": "application/json"
+}
+
+response = requests.post(directions_api, headers=headers, json=body)
+json_data = response.json()
+
+if response.status_code == 200 and 'routes' in json_data and json_data['routes']:
+    route = json_data['routes'][0]
+    if 'segments' in route and route['segments']:
+        segment = route['segments'][0]
+
+        duration = segment.get('duration', 'N/A')
+        distance = segment.get('distance', 'N/A')
+
+        print(f"Route from {orig} to {dest}:")
+        print(f"Estimated Duration: {duration / 60:.2f} minutes")
+        print(f"Distance: {distance / 1000:.2f} km")
+        print("\nStep-by-step Directions:\n")
+
+        if 'steps' in segment:
+            for step in segment['steps']:
+                instruction = step.get('instruction', 'N/A')
+                step_distance = step.get('distance', 'N/A')
+                print(f"- {instruction} ({step_distance:.2f} m)")
         else:
-            result = {"error": "Failed to retrieve route."}
+            print("No detailed instructions available.")
 
-# Guardar el resultado en un archivo JSON
-with open("result.json", "w") as f:
-    json.dump(result, f)
-
-# Redirigir de vuelta a la página principal
-print("<script>window.location.href = 'index.html';</script>")
+    else:
+        print("Error: No segments found in the route.")
+else:
+    print(f"Error: {response.status_code} - {response.text}")
